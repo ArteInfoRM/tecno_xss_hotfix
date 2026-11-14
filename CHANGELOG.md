@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.1.1] - 2026-11-14
+
+### Fixed
+- Recognize the native restrictive email validator found in PrestaShop 1.7.4.0 and 1.7.6.9 without adding a redundant guard (issue #2).
+- Report mixed Customer Threads templates as vulnerable while any bare email token remains; escape every occurrence when applying the patch.
+- Inspect the actual `ValidateCore::isEmail()` method and match known implementations. Unrecognized implementations are left unchanged and shown for manual review, instead of being reported as already patched.
+- Scope validator edits to the recognized method and ignore patch-like text in comments or unrelated code. Preserve idempotency and the original backup on repeat application, including previously duplicated Egulias guards.
+- Keep existing validation logic in the manual-fix instructions and reject all three HTML delimiters in the example guard.
+
+### Changed
+- Align release packaging: exclude generated configuration files, use short array syntax in translations, and protect template files through the root Apache rules.
+
+### Added
+- Offline regression checks using separately downloaded official PrestaShop source fixtures.
+
 ## [1.1.0] — 2026-04-23
 
 ### Added

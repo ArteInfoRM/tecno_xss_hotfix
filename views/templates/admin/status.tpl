@@ -91,9 +91,9 @@
                     {l s='Manual Fix Required for isEmail()' mod='tecno_xss_hotfix'}
                 </h4>
 
-                {if $is_old_ps}
+                {if $validator_signature_unknown}
                     <p>
-                        {l s='PS version is below 8.0.2: automatic Validate.php patching is not applied because the fix targets a code path that does not exist in this version. Add the double-quote rejection check manually to' mod='tecno_xss_hotfix'}
+                        {l s='The isEmail() implementation is not recognized. Automatic changes were skipped. Review the existing validation before applying a manual fix to' mod='tecno_xss_hotfix'}
                         <strong>classes/Validate.php</strong>:
                     </p>
                 {/if}

@@ -1,7 +1,7 @@
 <?php
 
 global $_MODULE;
-$_MODULE = array();
+$_MODULE = [];
 $_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_1885e4b1845659e12ceb338ae20aa1f2'] = 'XSS Hotfix GHSA-w9f3-qc75-qgx9';
 $_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_13ebc68a83cb4e9bb913e7eebf3173c2'] = 'Sicherheitspatch für gespeichertes XSS in Customer Threads BO (CVE 9.3/10, CWE-79)';
 $_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_d144f17c95431dddefef5163d0fbdb2d'] = 'Template-Patch übersprungen: _PS_ADMIN_DIR_ im CLI-Kontext nicht verfügbar. Öffnen Sie die Modulkonfigurationsseite im Back-Office, um ihn anzuwenden.';
@@ -103,3 +103,6 @@ $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_ce3658789467adab785cac361bd33eb
 $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_08bf83746377cd3b6232c440f9aa2bd1'] = '4. Bereinigung';
 $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_b8175e86653da020945650a50b803899'] = 'Die oben gefundenen verdächtigen Datensätze löschen (nach Notierung für den Vorfallbericht).';
 $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_10cf9fa54dbb3457cd1715724c4ad3a7'] = 'Sicherstellen, dass der Patch angewendet wurde (grüner Status auf der Patch-Status-Seite), damit neue Versuche auf Validierungsebene abgelehnt werden.';
+$_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_ce5ae04ba709adb859809677ff2b7634'] = 'Validate.php: Die erkannte native Validierung weist HTML-Begrenzungszeichen bereits zurück. Kein Validator-Patch erforderlich.';
+$_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_4138b360a57eed1e742b33079adc0dbd'] = 'Validate.php: Unbekannte isEmail()-Implementierung. Keine Änderungen vorgenommen; manuelle Prüfung erforderlich.';
+$_MODULE['<{tecno_xss_hotfix}prestashop>status_915b8a39b1bd5f125da4da9c6af1c062'] = 'Die isEmail()-Implementierung ist unbekannt. Automatische Änderungen wurden übersprungen. Prüfen Sie die vorhandene Validierung vor einer manuellen Korrektur in';

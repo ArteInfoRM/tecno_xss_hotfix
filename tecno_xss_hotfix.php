@@ -7,7 +7,7 @@
  *  @author    Arte e Informatica <helpdesk@tecnoacquisti.com>
  *  @copyright 2009-2026 Arte e Informatica
  *  @license   https://opensource.org/licenses/MIT  MIT License
- *  @version   1.0.0
+ *  @version   1.1.1
  */
 
 if (!defined('_PS_VERSION_')) {
@@ -20,11 +20,11 @@ class Tecno_Xss_Hotfix extends Module
     const VULNERABLE_TOKEN = '{$thread->email}';
     const PATCHED_TOKEN    = '{$thread->email|escape:\'html\':\'UTF-8\'}';
 
-    // Validate.php isEmail() — PS >= 8.0.2: regex mode flag
+    // Validate.php isEmail(): Symfony validation mode flag
     const VALIDATE_VULNERABLE = "'mode' => 'loose',";
     const VALIDATE_PATCHED    = "'mode' => 'strict',";
 
-    // Validate.php isEmail() — PS 1.7 (egulias EmailValidator): inject guard before return
+    // Validate.php isEmail(): egulias EmailValidator guard before return
     const VALIDATE_VULNERABLE_17 = 'return !empty($email) && (new EmailValidator())->isValid(';
     const VALIDATE_PATCHED_17    = "if (!empty(\$email) && preg_match('/[<>\"]/', \$email)) { return false; }\n        return !empty(\$email) && (new EmailValidator())->isValid(";
     const VALIDATE_PATCHED_17_SENTINEL = "preg_match('/[<>\"]/', \$email)";
@@ -35,7 +35,7 @@ class Tecno_Xss_Hotfix extends Module
     {
         $this->name          = 'tecno_xss_hotfix';
         $this->tab           = 'administration';
-        $this->version       = '1.1.0';
+        $this->version       = '1.1.1';
         $this->author        = 'Tecnoacquisti.com';
         $this->need_instance = 0;
         $this->bootstrap     = true;
@@ -120,18 +120,21 @@ class Tecno_Xss_Hotfix extends Module
         if (!file_exists($path)) {
             return ['status' => 'error', 'message' => sprintf($this->l('File not found: %s'), $path)];
         }
-        if (!is_writable($path)) {
-            return ['status' => 'error', 'message' => sprintf($this->l('File not writable: %s'), $path)];
-        }
-
         $content = file_get_contents($path);
         if ($content === false) {
             return ['status' => 'error', 'message' => sprintf($this->l('Cannot read: %s'), $path)];
         }
 
-        // Already patched or different version — both are safe states
         if (strpos($content, self::VULNERABLE_TOKEN) === false) {
-            return ['status' => 'already_patched', 'message' => $this->l('Template: vulnerable token not found (already patched or different PS version).')];
+            $status = $this->getTemplatePatchStatus();
+            if ($status['status'] === 'patched') {
+                $status['status'] = 'already_patched';
+            }
+
+            return $status;
+        }
+        if (!is_writable($path)) {
+            return ['status' => 'error', 'message' => sprintf($this->l('File not writable: %s'), $path)];
         }
 
         $backupPath = $path . self::BACKUP_SUFFIX;
@@ -148,8 +151,7 @@ class Tecno_Xss_Hotfix extends Module
     }
 
     /**
-     * Patch Validate.php isEmail() regex mode: loose → strict.
-     * Only executed for PS >= 8.0.2 AND when no isEmail() override exists.
+     * Patch only recognized vulnerable isEmail() implementations without an override.
      *
      * @return array{status:string, message:string}
      */
@@ -170,34 +172,50 @@ class Tecno_Xss_Hotfix extends Module
         if (!file_exists($path)) {
             return ['status' => 'error', 'message' => sprintf($this->l('Validate.php not found: %s'), $path)];
         }
-        if (!is_writable($path)) {
-            return ['status' => 'error', 'message' => sprintf($this->l('Validate.php not writable: %s'), $path)];
-        }
-
         $content = file_get_contents($path);
         if ($content === false) {
             return ['status' => 'error', 'message' => sprintf($this->l('Cannot read Validate.php: %s'), $path)];
         }
 
-        $isOld = version_compare(_PS_VERSION_, '8.0.2', '<');
-        $vulnerable = $isOld ? self::VALIDATE_VULNERABLE_17 : self::VALIDATE_VULNERABLE;
-        $patched    = $isOld ? self::VALIDATE_PATCHED_17    : self::VALIDATE_PATCHED;
+        $inspection = $this->inspectEmailValidator($content);
+        if ($inspection['status'] !== 'vulnerable') {
+            $status = $this->getValidatorInspectionStatus($inspection);
+            if ($status['status'] === 'patched') {
+                $status['status'] = 'already_patched';
+            }
 
-        // PS 1.7 (only): VALIDATE_PATCHED_17 contains VALIDATE_VULNERABLE_17, so strpos() would always return true even after the first patch.
-        if ($isOld && strpos($content, self::VALIDATE_PATCHED_17_SENTINEL) !== false) {
-            return ['status' => 'already_patched', 'message' => $this->l('Validate.php already patched.')];
+            return $status;
+        }
+        if (!is_writable($path)) {
+            return ['status' => 'error', 'message' => sprintf($this->l('Validate.php not writable: %s'), $path)];
         }
 
-        if (strpos($content, $vulnerable) === false) {
-            return ['status' => 'already_patched', 'message' => $this->l('Validate.php: token not found (already patched or different PS version).')];
+        $body = $inspection['body'];
+        if ($inspection['kind'] === 'egulias') {
+            $guard = substr(self::VALIDATE_PATCHED_17, 0, -strlen(self::VALIDATE_VULNERABLE_17));
+            $body = "\n        " . $guard . ltrim($body);
+        } else {
+            // The complete method body is recognized before replacing its mode literal.
+            $offset = 0;
+            foreach (token_get_all('<?php ' . $body) as $token) {
+                $text = is_array($token) ? $token[1] : $token;
+                if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING && $text === "'loose'") {
+                    $body = substr_replace($body, "'strict'", $offset - 6, strlen($text));
+                    break;
+                }
+                $offset += strlen($text);
+            }
         }
-        
+        $newContent = substr_replace($content, $body, $inspection['start'], $inspection['length']);
+        if ($this->inspectEmailValidator($newContent)['status'] !== 'patched') {
+            return ['status' => 'unknown', 'message' => $this->l('Validate.php: unrecognized isEmail() implementation. No changes made; manual review required.')];
+        }
+
         $backupPath = $path . self::BACKUP_SUFFIX;
         if (!copy($path, $backupPath)) {
             return ['status' => 'error', 'message' => sprintf($this->l('Cannot create backup: %s'), $backupPath)];
         }
 
-        $newContent = str_replace($vulnerable, $patched, $content);
         if (file_put_contents($path, $newContent) === false) {
             return ['status' => 'error', 'message' => sprintf($this->l('Cannot write Validate.php: %s'), $path)];
         }
@@ -242,11 +260,11 @@ class Tecno_Xss_Hotfix extends Module
         if ($content === false) {
             return ['status' => 'error', 'message' => sprintf($this->l('Cannot read: %s'), $path)];
         }
-        if (strpos($content, self::PATCHED_TOKEN) !== false) {
-            return ['status' => 'patched', 'message' => $this->l('Template patched correctly.')];
-        }
         if (strpos($content, self::VULNERABLE_TOKEN) !== false) {
             return ['status' => 'vulnerable', 'message' => $this->l('Template is VULNERABLE — patch not yet applied!')];
+        }
+        if (strpos($content, self::PATCHED_TOKEN) !== false) {
+            return ['status' => 'patched', 'message' => $this->l('Template patched correctly.')];
         }
         return ['status' => 'unknown', 'message' => $this->l('Template: cannot determine status (tokens not found in file).')];
     }
@@ -264,23 +282,187 @@ class Tecno_Xss_Hotfix extends Module
         if ($content === false) {
             return ['status' => 'error', 'message' => sprintf($this->l('Cannot read: %s'), $path)];
         }
-        $isOld = version_compare(_PS_VERSION_, '8.0.2', '<');
-        if ($isOld) {
-            if (strpos($content, self::VALIDATE_PATCHED_17_SENTINEL) !== false) {
-                return ['status' => 'patched', 'message' => $this->l('Validate.php patched correctly (PS 1.7 guard injected).')];
-            }
-            if (strpos($content, self::VALIDATE_VULNERABLE_17) !== false) {
-                return ['status' => 'vulnerable', 'message' => $this->l('Validate.php is VULNERABLE — patch not yet applied!')];
-            }
-        } else {
-            if (strpos($content, self::VALIDATE_PATCHED) !== false) {
-                return ['status' => 'patched', 'message' => $this->l('Validate.php patched correctly.')];
-            }
-            if (strpos($content, self::VALIDATE_VULNERABLE) !== false) {
-                return ['status' => 'vulnerable', 'message' => $this->l('Validate.php is VULNERABLE — patch not yet applied!')];
+        return $this->getValidatorInspectionStatus($this->inspectEmailValidator($content));
+    }
+
+    /**
+     * Normalize PHP tokens, preserving token types, boundaries and literals.
+     *
+     * @param string $code PHP fragment without an opening tag
+     *
+     * @return string
+     */
+    protected function normalizePhpCode($code)
+    {
+        $normalized = '';
+        foreach (token_get_all('<?php ' . $code) as $token) {
+            if (is_array($token)) {
+                if (in_array($token[0], [T_OPEN_TAG, T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                    continue;
+                }
+                $normalized .= token_name($token[0]) . ':' . strlen($token[1]) . ':' . $token[1] . ';';
+            } else {
+                $normalized .= 'CHAR:1:' . $token . ';';
             }
         }
-        return ['status' => 'unknown', 'message' => $this->l('Validate.php: cannot determine status.')];
+
+        return $normalized;
+    }
+
+    /**
+     * Locate the direct ValidateCore::isEmail() body, ignoring comments and strings.
+     * Ambiguous declarations and unfamiliar signatures require manual review.
+     *
+     * @param string $content Complete Validate.php source
+     *
+     * @return array|null Body and byte offsets, or null when unrecognized
+     */
+    protected function getEmailMethodBody($content)
+    {
+        $tokens = [];
+        $offset = 0;
+        foreach (token_get_all($content) as $token) {
+            $id = is_array($token) ? $token[0] : null;
+            $text = is_array($token) ? $token[1] : $token;
+            if ($id === T_NAMESPACE) {
+                return null;
+            }
+            if (!in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                $tokens[] = ['id' => $id, 'text' => $text, 'offset' => $offset];
+            }
+            $offset += strlen($text);
+        }
+
+        $classCount = 0;
+        $method = null;
+        $count = count($tokens);
+        for ($i = 0; $i < $count; ++$i) {
+            if ($tokens[$i]['id'] !== T_CLASS || !isset($tokens[$i + 1])
+                || $tokens[$i + 1]['id'] !== T_STRING || strcasecmp($tokens[$i + 1]['text'], 'ValidateCore') !== 0) {
+                continue;
+            }
+            ++$classCount;
+            while ($i < $count && $tokens[$i]['text'] !== '{') {
+                ++$i;
+            }
+            $depth = 1;
+            for (++$i; $i < $count && $depth > 0; ++$i) {
+                $token = $tokens[$i];
+                if ($depth === 1 && $token['id'] === T_FUNCTION && isset($tokens[$i + 1])
+                    && strcasecmp($tokens[$i + 1]['text'], 'isEmail') === 0) {
+                    $signature = '';
+                    for ($j = $i; $j < $count && $tokens[$j]['text'] !== '{' && $tokens[$j]['text'] !== ';'; ++$j) {
+                        $signature .= $tokens[$j]['text'];
+                    }
+                    if ($signature !== 'functionisEmail($email)' || $method !== null
+                        || $j >= $count || $tokens[$j]['text'] !== '{') {
+                        return null;
+                    }
+                    $start = $tokens[$j]['offset'] + 1;
+                    $bodyDepth = 1;
+                    for (++$j; $j < $count; ++$j) {
+                        if ($tokens[$j]['text'] === '{' || in_array($tokens[$j]['id'], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) {
+                            ++$bodyDepth;
+                        } elseif ($tokens[$j]['text'] === '}') {
+                            --$bodyDepth;
+                        }
+                        if ($bodyDepth === 0) {
+                            $length = $tokens[$j]['offset'] - $start;
+                            $method = ['body' => substr($content, $start, $length), 'start' => $start, 'length' => $length];
+                            $i = $j;
+                            break;
+                        }
+                    }
+                    if ($bodyDepth !== 0) {
+                        return null;
+                    }
+                    continue;
+                }
+                if ($token['text'] === '{' || in_array($token['id'], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) {
+                    ++$depth;
+                } elseif ($token['text'] === '}') {
+                    --$depth;
+                }
+            }
+            --$i;
+            if ($depth !== 0) {
+                return null;
+            }
+        }
+
+        return $classCount === 1 ? $method : null;
+    }
+
+    /**
+     * Match audited upstream method bodies after removing whitespace and comments.
+     * Hashes identify implementations, not the integrity of the whole core file.
+     *
+     * @param string $content Complete Validate.php source
+     *
+     * @return array
+     */
+    protected function inspectEmailValidator($content)
+    {
+        $method = $this->getEmailMethodBody($content);
+        if ($method === null) {
+            return ['status' => 'unknown'];
+        }
+        $normalized = $this->normalizePhpCode($method['body']);
+        // Native PS 1.7.4.0 / 1.7.6.9 rejects the HTML delimiters already.
+        if (hash('sha256', $normalized) === 'aaf4b0b20aea487a406c8b1d26c2506b07187924d395718137fd1ee01bf9d72d') {
+            return ['status' => 'not_applicable', 'kind' => 'native'] + $method;
+        }
+
+        $guard = $this->normalizePhpCode(substr(self::VALIDATE_PATCHED_17, 0, -strlen(self::VALIDATE_VULNERABLE_17)));
+        $guardCount = 0;
+        while (strpos($normalized, $guard) === 0) {
+            $normalized = substr($normalized, strlen($guard));
+            ++$guardCount;
+        }
+        // Egulias: PS 1.7.7.0 / 1.7.8.11 and PS 8.0.0 / 8.0.2.
+        if (in_array(hash('sha256', $normalized), [
+            '99105473398b3d7dd86406582ce81e064b5c9282104aa20c73a62ce270805fc3',
+            'fc3babd28b61a787e454f6e596ca185079c575f19afee6073eb2c815ecd5dcbf',
+        ], true)) {
+            return ['status' => $guardCount > 0 ? 'patched' : 'vulnerable', 'kind' => 'egulias'] + $method;
+        }
+        // Symfony: PS 8.2.5 / 9.1.0 loose and PS 8.2.6 / 9.1.1 strict.
+        $hash = hash('sha256', $this->normalizePhpCode($method['body']));
+        if (in_array($hash, [
+            '7e6172c80e0841723f3e3e7836f2a1647af0bc8de0835f2599e4d2702fd20044',
+            'd90afe88514fc8f6c122d18b6e7c0b808f3fdad61d36b867344a5e525c3da80d',
+        ], true)) {
+            return ['status' => 'vulnerable', 'kind' => 'symfony'] + $method;
+        }
+        if (in_array($hash, [
+            'e9c577bed2f5a0a374634a33f592a3ecf9932ac8384764d07c568c1b3ace1760',
+            'dcf4efe597fa1649d08495aa1de49f14e6d420e5b3d4017212495f709485bd0d',
+        ], true)) {
+            return ['status' => 'patched', 'kind' => 'symfony'] + $method;
+        }
+
+        return ['status' => 'unknown'];
+    }
+
+    /**
+     * Translate inspection results consistently for checks and patch attempts.
+     *
+     * @param array $inspection Recognized implementation status
+     *
+     * @return array
+     */
+    protected function getValidatorInspectionStatus($inspection)
+    {
+        switch ($inspection['status']) {
+            case 'not_applicable':
+                return ['status' => 'not_applicable', 'message' => $this->l('Validate.php: recognized native validation already rejects HTML delimiters. No validator patch required.')];
+            case 'patched':
+                return ['status' => 'patched', 'message' => $this->l('Validate.php patched correctly.')];
+            case 'vulnerable':
+                return ['status' => 'vulnerable', 'message' => $this->l('Validate.php is VULNERABLE — patch not yet applied!')];
+            default:
+                return ['status' => 'unknown', 'message' => $this->l('Validate.php: unrecognized isEmail() implementation. No changes made; manual review required.')];
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -288,34 +470,21 @@ class Tecno_Xss_Hotfix extends Module
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the PHP code snippet to display when automatic Validate.php patching
-     * is not possible (old PS or isEmail() override present).
+     * Show a guard to insert while retaining all existing validation logic.
+     *
+     * @param bool $hasOverride Whether the target is the override file
+     *
+     * @return string
      */
     protected function getManualFixCode($hasOverride)
     {
-        if ($hasOverride) {
-            // Override file exists: user must add the check there
-            return <<<'PHPCODE'
-// In override/classes/Validate.php — add this at the top of the isEmail() body:
+        $path = $hasOverride ? 'override/classes/Validate.php' : 'classes/Validate.php';
 
-public static function isEmail($email)
-{
-    // XSS guard: reject addresses containing double-quote (GHSA-w9f3-qc75-qgx9)
-    if (strpos($email, '"') !== false) {
-        return false;
-    }
-    return parent::isEmail($email);
-}
-PHPCODE;
-        }
-
-        // Old PS without override: user must edit core directly
-        return <<<'PHPCODE'
-// In classes/Validate.php — add these lines at the very top of the isEmail() method body,
-// BEFORE any existing return statement:
-
-// XSS guard: reject addresses containing double-quote (GHSA-w9f3-qc75-qgx9)
-if (strpos($email, '"') !== false) {
+        return '// Review ' . $path . " and insert this at the start of isEmail() if needed:\n"
+            . <<<'PHPCODE'
+// Keep all existing validation logic after this guard.
+// GHSA-w9f3-qc75-qgx9: reject HTML delimiters.
+if (!empty($email) && preg_match('/[<>"]/', $email)) {
     return false;
 }
 PHPCODE;
@@ -342,17 +511,18 @@ PHPCODE;
 
         $hasOverride  = $this->hasIsEmailOverride();
         $psVersion    = _PS_VERSION_;
-        $needsManual  = $hasOverride; // only manual if override present; PS 1.7 is now auto-patched
+        $validateStatus = $this->getValidatePatchStatus();
+        $needsManual = $hasOverride || $validateStatus['status'] === 'unknown';
 
         $this->context->smarty->assign([
             'ps_version'       => $psVersion,
             'has_override'     => $hasOverride,
             'override_path'    => $this->getOverrideClassPath(),
             'needs_manual_fix' => $needsManual,
-            'is_old_ps'        => false,
+            'validator_signature_unknown' => $validateStatus['status'] === 'unknown',
             'manual_fix_code'  => $this->getManualFixCode($hasOverride),
             'template_status'  => $this->getTemplatePatchStatus(),
-            'validate_status'  => $this->getValidatePatchStatus(),
+            'validate_status'  => $validateStatus,
             'patch_results'    => $patchResults,
         ]);
 

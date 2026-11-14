@@ -8,7 +8,7 @@ Security hotfix module for PrestaShop — patches stored XSS vulnerability [GHSA
 | **Type** | Stored XSS (CWE-79) |
 | **Vector** | Customer email field → Back-Office Customer Threads view |
 | **Affected** | PS 1.7.x, PS 8.x < 8.2.6, PS 9.x < 9.1.1 |
-| **Author** | [Tecnoacquisti.com](https://www.tecnoacquisti.com) |
+| **Author** | [Tecnoacquisti.com®](https://www.tecnoacquisti.com) |
 
 ---
 
@@ -27,9 +27,9 @@ When a Back-Office administrator opens the **Customer Threads** page, the email 
 1. `{admin}/themes/default/template/controllers/customer_threads/helpers/view/view.tpl`  
    `{$thread->email}` rendered without `|escape:'html':'UTF-8'`
 
-2. `classes/Validate.php` — `isEmail()` accepts email addresses containing `<`, `>` and `"`:
-   - PS ≥ 8.0.2: regex uses `'mode' => 'loose'` (allows quoted strings)
-   - PS 1.7: `egulias/email-validator` with `RFCValidation` (RFC 5321 quoted local-parts)
+2. Some `classes/Validate.php` implementations accept quoted email local-parts through Egulias or Symfony's `'mode' => 'loose'` validation. The module identifies the actual `ValidateCore::isEmail()` implementation rather than assuming its behavior from the PrestaShop version.
+
+The stock native regular expression checked in PrestaShop 1.7.4.0 and 1.7.6.9 already rejects `<`, `>` and double quotes. It does not need an additional validator guard. The template is checked separately: the stock 1.7.4.0 template mixes escaped and unescaped email occurrences, so its rendering still requires correction.
 
 ---
 
@@ -40,8 +40,12 @@ When a Back-Office administrator opens the **Customer Threads** page, the email 
 | Target | Action |
 |--------|--------|
 | `{admin}/themes/default/template/…/view.tpl` | Adds `\|escape:'html':'UTF-8'` to `{$thread->email}` |
-| `classes/Validate.php` (PS ≥ 8.0.2, no override) | Changes `'mode' => 'loose'` → `'mode' => 'strict'` |
-| `classes/Validate.php` (PS 1.7, no override) | Injects `preg_match('/[<>"]/', $email)` guard before the `EmailValidator` call |
+| Recognized Symfony loose validator, no override | Changes only the `isEmail()` mode literal from `'loose'` to `'strict'` |
+| Recognized Egulias validator, no override | Inserts a `preg_match('/[<>"]/', $email)` guard at the start of `isEmail()` |
+| Recognized native restrictive validator | Shows an informational status; leaves the validator unchanged |
+| Unrecognized validator or template | Shows an unknown status for manual review; does not claim it is already patched |
+
+Every bare email token in the template must be escaped before the template is reported as patched. Reapplying a successful patch leaves the file and its original backup unchanged.
 
 Before any write a `.tecno-hotfix-backup` file is created next to the original.
 
@@ -50,6 +54,12 @@ Before any write a `.tecno-hotfix-backup` file is created next to the original.
 ### When an `isEmail()` override is present
 
 `override/classes/Validate.php` is never modified automatically. The module detects the override and shows the code snippet to apply manually.
+
+### Recognition limits
+
+The validator check uses tokenized method bodies, ignoring formatting and comments while retaining string literals. It recognizes the upstream implementations checked in 1.7.4.0, 1.7.6.9, 1.7.7.0, 1.7.8.11, 8.0.0, 8.0.2, 8.2.5, 8.2.6, 9.1.0 and 9.1.1, including identical implementations in other releases. Already injected Egulias guards are recognized, including previously duplicated guards.
+
+A custom or newer implementation with a different body requires manual review. A recognized validator does not certify the integrity of the complete file, other overrides, the database or the installation. Automatic patching on installation and the declared PrestaShop 1.7+ compatibility remain enabled.
 
 ### Forensic DB scan
 
@@ -75,7 +85,7 @@ If hits are found, guided remediation steps are shown inline.
 1. Upload the `tecno_xss_hotfix` directory to `{shop}/modules/`
 2. Install from **Back-Office > Modules > Module Manager**
 3. Patches are applied automatically on install
-4. Verify the green status badges on the module configuration page
+4. Review both statuses on the module configuration page. A recognized native restrictive validator has an informational status; unknown implementations require manual review.
 
 To re-apply (e.g. after a PS core update that overwrote `Validate.php`):  
 open the module configuration page and click **Apply / Re-apply Patches**.
@@ -84,16 +94,12 @@ open the module configuration page and click **Apply / Re-apply Patches**.
 
 ## Manual fix — isEmail() override
 
-If `override/classes/Validate.php` contains `isEmail()`, add this guard at the top of the method body:
+If `override/classes/Validate.php` contains `isEmail()`, review its existing validation and add this guard at the top of the method body if needed. Preserve all existing validation after it. The same review applies to an unrecognized core implementation:
 
 ```php
-public static function isEmail($email)
-{
-    // XSS guard — GHSA-w9f3-qc75-qgx9
-    if (!empty($email) && preg_match('/[<>"]/', $email)) {
-        return false;
-    }
-    return parent::isEmail($email);
+// GHSA-w9f3-qc75-qgx9: insert before the existing validation logic.
+if (!empty($email) && preg_match('/[<>"]/', $email)) {
+    return false;
 }
 ```
 

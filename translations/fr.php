@@ -1,7 +1,7 @@
 <?php
 
 global $_MODULE;
-$_MODULE = array();
+$_MODULE = [];
 $_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_1885e4b1845659e12ceb338ae20aa1f2'] = 'XSS Hotfix GHSA-w9f3-qc75-qgx9';
 $_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_13ebc68a83cb4e9bb913e7eebf3173c2'] = 'Correctif de sécurité pour XSS stocké dans Customer Threads BO (CVE 9.3/10, CWE-79)';
 $_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_d144f17c95431dddefef5163d0fbdb2d'] = 'Correctif du template ignoré : _PS_ADMIN_DIR_ non disponible en contexte CLI. Ouvrir la page de configuration du module dans le Back-Office pour l\'appliquer.';
@@ -103,3 +103,6 @@ $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_ce3658789467adab785cac361bd33eb
 $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_08bf83746377cd3b6232c440f9aa2bd1'] = '4. Nettoyage';
 $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_b8175e86653da020945650a50b803899'] = 'Supprimer les enregistrements suspects trouvés ci-dessus (après les avoir notés pour votre rapport d\'incident).';
 $_MODULE['<{tecno_xss_hotfix}prestashop>forensic_10cf9fa54dbb3457cd1715724c4ad3a7'] = 'S\'assurer que le correctif a été appliqué (statut vert sur la page État du Correctif) afin que les nouvelles tentatives soient rejetées au niveau de validation.';
+$_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_ce5ae04ba709adb859809677ff2b7634'] = 'Validate.php : la validation native reconnue rejette déjà les délimiteurs HTML. Aucun correctif du validateur requis.';
+$_MODULE['<{tecno_xss_hotfix}prestashop>tecno_xss_hotfix_4138b360a57eed1e742b33079adc0dbd'] = 'Validate.php : implémentation de isEmail() non reconnue. Aucune modification effectuée ; vérification manuelle requise.';
+$_MODULE['<{tecno_xss_hotfix}prestashop>status_915b8a39b1bd5f125da4da9c6af1c062'] = 'L’implémentation de isEmail() n’est pas reconnue. Les modifications automatiques ont été ignorées. Vérifiez la validation existante avant de corriger manuellement';

